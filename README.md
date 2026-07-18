@@ -41,23 +41,94 @@ flowchart LR
 
 Every layer speaks the same contract as a production stack: the simulator doesn't hand the pipeline convenient floats — it encodes real CAN payloads through the same DBC file the decoder uses, so the entire path (bit packing, scaling, signedness, out-of-range handling, unknown arbitration IDs) is exercised exactly as it would be on a vehicle.
 
-## Quick start
+## How to reproduce & run
+
+Everything below is fully reproducible on any machine with Python 3.10+ (Linux, macOS, or Windows). No external services, no API keys, no datasets to download — the physics simulator generates the data.
+
+**1. Clone and install**
 
 ```bash
-git clone https://github.com/AravindB98/voltiq && cd voltiq
+git clone https://github.com/AravindB98/voltiq.git
+cd voltiq
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-
-voltiq demo          # simulate a 5-vehicle fleet (1 year), ingest, analyze  (~30 s)
-voltiq serve         # dashboard + API at http://localhost:8000
 ```
 
-Or with Docker:
+**2. Seed a demo fleet** (5 vehicles, 1 year of telemetry, ~660k CAN-decoded rows, ~30 s)
+
+```bash
+voltiq demo
+```
+
+You should see three healthy vehicles, one flagged `critical` (weak cell caught by imbalance rules) and one flagged `watch` (cooling fault caught only by the Isolation Forest). Simulation is seeded, so results are deterministic.
+
+**3. Launch the dashboard and API**
+
+```bash
+voltiq serve
+# Dashboard  → http://localhost:8000
+# OpenAPI    → http://localhost:8000/docs
+```
+
+**4. Run the verification suite**
+
+```bash
+pytest -v            # 27 tests: physics, CAN round-trips, analytics math, HTTP flow
+ruff check .         # lint
+```
+
+**5. Experiment** — simulate your own scenarios and re-analyze:
+
+```bash
+voltiq simulate --vin MYTESTVIN0000001 --days 200 --daily-km 90 \
+                --fault weak_cell --fault-day 100
+voltiq analyze
+```
+
+**Docker (one command, zero setup):**
 
 ```bash
 docker build -t voltiq . && docker run -p 8000:8000 voltiq
 ```
 
-The demo fleet includes three healthy vehicles with different usage patterns and two seeded faults the analytics must catch: a **weak cell** that progressively sags (detected by imbalance rules → `critical`) and a **degraded cooling loop** (never violates a hard limit — only the Isolation Forest sees it → `watch`).
+## Tech stack
+
+| Layer | Technology | Why |
+|---|---|---|
+| CAN encoding/decoding | **cantools** + standard **DBC** file | The exact toolchain automotive teams use for CAN matrices |
+| API & validation | **FastAPI** + **Pydantic v2** | Typed request contracts, auto-generated OpenAPI docs |
+| Storage | **SQLite (WAL)** | Zero-service reproducibility; interface designed for TimescaleDB/ClickHouse swap |
+| ML | **scikit-learn** (Isolation Forest) + **NumPy** | Per-vehicle unsupervised anomaly baselines; least-squares fade fitting |
+| Dashboard | **Chart.js**, zero-build static HTML | No frontend toolchain needed to run the project |
+| Quality | **pytest**, **ruff**, **GitHub Actions** (Python 3.10–3.12), **Docker** | CI-verified on every push |
+
+## Practical applications
+
+The pipeline in this repo is a working blueprint for problems that battery-powered fleets deal with daily:
+
+* **Warranty & residual-value analytics** — SOH estimated from ordinary driving data (no reference discharge) is how OEMs assess degradation across a fleet without recalling vehicles.
+* **Predictive maintenance** — RUL with uncertainty bounds turns "the battery will fail eventually" into "schedule replacement in ~N months", which is what fleet operators actually budget against.
+* **Early fault detection** — the weak-cell and cooling-degradation scenarios mirror two of the most common real failure modes; catching them before a hard BMS limit trips is the difference between a service visit and a roadside event.
+* **Second-life battery grading** — the same capacity-fade history that feeds RUL is the input for deciding whether a retired pack goes to stationary storage or recycling.
+* **Telematics backend prototyping** — the ingest → decode → store → analyze path is the reference shape of any vehicle data platform; every interface here is a seam where production infrastructure (Kafka, TimescaleDB, a model registry) slots in.
+
+**Who is this relevant for?** EV OEMs (Tesla, Rivian, Lucid, BYD, VinFast, and the EV programs at legacy automakers), battery manufacturers and BMS suppliers (CATL, LG Energy Solution, Northvolt-style cell makers), commercial fleet operators and leasing companies, EV charging networks, battery-analytics startups, and second-life/recycling companies — plus anyone learning how battery telemetry systems fit together end to end.
+
+## Contributing
+
+VoltIQ is open source (MIT) and contributions are very welcome!
+
+⭐ **If this project is useful to you, please star the repo** — it genuinely helps others discover it.
+🍴 **Fork it** and make it your own: swap in a real CAN log, point it at a different chemistry's OCV curve, or wire the ingest API to real hardware.
+
+To contribute:
+
+1. **Fork** the repository and create a feature branch: `git checkout -b feat/my-improvement`
+2. Make your change, keeping the checks green: `pytest -v && ruff check .`
+3. Add tests for new behaviour — the CI runs the full suite plus an end-to-end demo on Python 3.10–3.12.
+4. Open a **pull request** with a clear description of what and why.
+
+Good first contributions: additional fault scenarios (sensor stuck-at, contactor issues), an LFP OCV curve, Kalman-filter SOC estimation, a TimescaleDB storage backend, MQTT ingestion, or dashboard improvements. Found a bug or have an idea? [Open an issue](https://github.com/AravindB98/voltiq/issues) — see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## What's inside
 
