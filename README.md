@@ -182,4 +182,4 @@ MIT — see [LICENSE](LICENSE).
 
 ---
 
-Built by **Aravind Balaji** · aravindo2011@gmail.com
+Built by **[Aravind Balaji](https://aravindbalaji.com)** · [aravindbalaji.com](https://aravindbalaji.com)

@@ -20,6 +20,10 @@ dependencies = [
     "scikit-learn>=1.4",
 ]
 
+[project.urls]
+Homepage = "https://aravindbalaji.com"
+Repository = "https://github.com/AravindB98/voltiq"
+
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27", "ruff>=0.4"]
 

@@ -37,4 +37,4 @@ pytest -v && ruff check .        # everything should be green before you start
 
 ## Questions
 
-Open an issue at https://github.com/AravindB98/voltiq/issues or email aravindo2011@gmail.com.
+Open an issue at https://github.com/AravindB98/voltiq/issues or reach me via [aravindbalaji.com](https://aravindbalaji.com).
