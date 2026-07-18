@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VoltIQ — Fleet Battery Intelligence</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#e6edf3;
+          --muted:#8b949e; --ok:#3fb950; --warn:#d29922; --crit:#f85149; --accent:#58a6ff; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font:14px/1.5 -apple-system,'Segoe UI',Roboto,sans-serif; padding:24px; }
+  h1 { font-size:20px; margin-bottom:4px; } h1 span { color:var(--accent); }
+  .sub { color:var(--muted); margin-bottom:20px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 16px; }
+  .card .n { font-size:26px; font-weight:600; } .card .l { color:var(--muted); font-size:12px; }
+  .n.ok{color:var(--ok)} .n.warn{color:var(--warn)} .n.crit{color:var(--crit)}
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  th,td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--border); font-size:13px; }
+  th { color:var(--muted); font-weight:500; } tr:hover td { background:#1c2129; cursor:pointer; }
+  .pill { padding:2px 9px; border-radius:10px; font-size:12px; font-weight:600; }
+  .pill.healthy{background:#1a3320;color:var(--ok)} .pill.watch{background:#332b13;color:var(--warn)}
+  .pill.critical{background:#3d1a1a;color:var(--crit)} .pill.unknown{background:#21262d;color:var(--muted)}
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px; }
+  .panel { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; }
+  .panel h3 { font-size:13px; color:var(--muted); margin-bottom:10px; }
+  .alert { padding:6px 0; border-bottom:1px solid var(--border); font-size:12px; }
+  .alert b.warning{color:var(--warn)} .alert b.critical{color:var(--crit)}
+  @media (max-width:900px){ .row{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<h1>⚡ Volt<span>IQ</span> — Fleet Battery Intelligence</h1>
+<div class="sub">CAN telemetry → anomaly detection → SOH / RUL prediction</div>
+
+<div class="cards" id="cards"></div>
+<table id="fleet">
+  <thead><tr><th>VIN</th><th>Status</th><th>SOH</th><th>RUL (km)</th><th>RUL (days)</th>
+  <th>Cycles</th><th>Odometer</th><th>Anomaly rate</th><th>Alerts</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<div class="row">
+  <div class="panel"><h3 id="chart1-title">Pack voltage &amp; current — select a vehicle</h3><canvas id="chart1"></canvas></div>
+  <div class="panel"><h3 id="chart2-title">Cell imbalance &amp; temperature</h3><canvas id="chart2"></canvas></div>
+</div>
+<div class="panel" style="margin-top:16px"><h3 id="alerts-title">Alerts</h3><div id="alerts"></div></div>
+
+<script>
+const fmt = (v, d=1) => v == null ? '—' : Number(v).toFixed(d);
+let charts = {};
+
+async function loadFleet() {
+  const r = await fetch('/api/v1/fleet'); const f = await r.json();
+  document.getElementById('cards').innerHTML = `
+    <div class="card"><div class="n">${f.vehicles}</div><div class="l">Vehicles</div></div>
+    <div class="card"><div class="n ok">${f.healthy}</div><div class="l">Healthy</div></div>
+    <div class="card"><div class="n warn">${f.watch}</div><div class="l">Watch</div></div>
+    <div class="card"><div class="n crit">${f.critical}</div><div class="l">Critical</div></div>
+    <div class="card"><div class="n">${f.frames_stored.toLocaleString()}</div><div class="l">Frames stored</div></div>`;
+  const tb = document.querySelector('#fleet tbody');
+  tb.innerHTML = f.fleet.map(v => `
+    <tr onclick="selectVehicle('${v.vin}')">
+      <td>${v.vin}</td><td><span class="pill ${v.status}">${v.status}</span></td>
+      <td>${fmt(v.soh_pct)} %</td><td>${v.rul_km ? Math.round(v.rul_km).toLocaleString() : '—'}</td>
+      <td>${v.rul_days ? Math.round(v.rul_days).toLocaleString() : '—'}</td>
+      <td>${fmt(v.cycles, 0)}</td><td>${v.odometer_km ? Math.round(v.odometer_km).toLocaleString() + ' km' : '—'}</td>
+      <td>${fmt(v.anomaly_rate_pct)} %</td><td>${v.open_alerts}</td>
+    </tr>`).join('');
+  if (f.fleet.length) selectVehicle(f.fleet[0].vin);
+}
+
+function drawChart(id, labels, datasets) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      animation:false, responsive:true,
+      plugins:{ legend:{ labels:{ color:'#8b949e', boxWidth:12 } } },
+      elements:{ point:{ radius:0 } },
+      scales:{
+        x:{ ticks:{ color:'#8b949e', maxTicksLimit:8 }, grid:{ color:'#21262d' } },
+        y:{ ticks:{ color:'#8b949e' }, grid:{ color:'#21262d' } },
+        y2:{ position:'right', ticks:{ color:'#8b949e' }, grid:{ display:false } }
+      }
+    }
+  });
+}
+
+async function selectVehicle(vin) {
+  const [pack, cells, temps, alerts] = await Promise.all([
+    fetch(`/api/v1/vehicles/${vin}/telemetry?message=BMS_PackStatus&limit=800`).then(r=>r.json()),
+    fetch(`/api/v1/vehicles/${vin}/telemetry?message=BMS_CellStats&limit=800`).then(r=>r.json()),
+    fetch(`/api/v1/vehicles/${vin}/telemetry?message=BMS_Temps&limit=800`).then(r=>r.json()),
+    fetch(`/api/v1/vehicles/${vin}/alerts?limit=30`).then(r=>r.json()),
+  ]);
+  const day = ts => new Date(ts*1000).toISOString().slice(0,10);
+  document.getElementById('chart1-title').textContent = `Pack voltage & current — ${vin}`;
+  drawChart('chart1', pack.map(p=>day(p.ts)), [
+    { label:'Pack V', data:pack.map(p=>p.PackVoltage), borderColor:'#58a6ff', yAxisID:'y', borderWidth:1.5 },
+    { label:'Current A', data:pack.map(p=>p.PackCurrent), borderColor:'#bc8cff', yAxisID:'y2', borderWidth:1 },
+  ]);
+  document.getElementById('chart2-title').textContent = `Cell imbalance & temperature — ${vin}`;
+  drawChart('chart2', cells.map(c=>day(c.ts)), [
+    { label:'ΔCell mV', data:cells.map(c=>c.CellVoltMax-c.CellVoltMin), borderColor:'#f85149', yAxisID:'y', borderWidth:1.5 },
+    { label:'Temp °C', data:temps.map(t=>t.TempAvg), borderColor:'#d29922', yAxisID:'y2', borderWidth:1 },
+  ]);
+  document.getElementById('alerts-title').textContent = `Alerts — ${vin}`;
+  document.getElementById('alerts').innerHTML = alerts.length
+    ? alerts.map(a=>`<div class="alert"><b class="${a.severity}">${a.severity.toUpperCase()}</b>
+        [${a.code}] ${a.message} <span style="color:#8b949e">· ${new Date(a.timestamp*1000).toLocaleString()}</span></div>`).join('')
+    : '<div class="alert">No alerts 🎉</div>';
+}
+loadFleet();
+</script>
+</body>
+</html>
