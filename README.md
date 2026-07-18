@@ -114,6 +114,22 @@ The pipeline in this repo is a working blueprint for problems that battery-power
 
 **Who is this relevant for?** EV OEMs (Tesla, Rivian, Lucid, BYD, VinFast, and the EV programs at legacy automakers), battery manufacturers and BMS suppliers (CATL, LG Energy Solution, Northvolt-style cell makers), commercial fleet operators and leasing companies, EV charging networks, battery-analytics startups, and second-life/recycling companies — plus anyone learning how battery telemetry systems fit together end to end.
 
+## How companies can use this code
+
+VoltIQ is structured so that every simulated component has an obvious real-world replacement. A team adopting it would proceed in five steps, none of which requires touching the analytics:
+
+**1. Swap in your CAN matrix.** Replace `voltiq/data/voltiq_bms.dbc` with your vehicle's DBC release (or pass a path to `DbcCodec`). The decoder, ingestion, and storage layers are signal-name driven — map your pack/cell/temperature signal names in `AnalyticsEngine` and everything downstream works unchanged.
+
+**2. Point real telemetry at the ingest API.** `POST /api/v1/ingest/frames` already accepts exactly what a telematics unit produces: VIN, timestamp, arbitration ID, raw hex payload. A gateway forwarding CAN frames from vehicles (or a batch loader replaying `.blf`/`.asc`/MDF log files) is a thin adapter away. Unknown IDs are counted and skipped, so you can feed it the whole bus without pre-filtering.
+
+**3. Scale the storage seam.** The entire persistence contract is the ~10-method `Store` class (`voltiq/ingest/store.py`). Implementing it against TimescaleDB, ClickHouse, or your data lake is an afternoon's work; no analytics or API code changes. Likewise, batch HTTP ingestion swaps for a Kafka consumer by reusing `IngestPipeline` as-is.
+
+**4. Calibrate to your chemistry.** `PackConfig` holds the physical assumptions (cell count, rated capacity, EOL threshold, fade constant); the OCV curve and thresholds in `anomaly.py` are data, not logic. Fit them from your cell characterization data and warranty policy.
+
+**5. Operationalize the outputs.** `voltiq analyze` is a stateless batch job — schedule it (Airflow/cron), and route the alerts table into your existing incident tooling via webhook. The `/api/v1/fleet` endpoint is ready to back an internal ops dashboard, or feed SOH/RUL directly into warranty-reserve and residual-value models.
+
+Beyond direct adoption, the simulator alone is useful on its own: it generates unlimited labeled fault data (weak cell, cooling degradation, with ground-truth SOH) for benchmarking battery-health algorithms — something real fleets can rarely provide because faults are thankfully rare and ground truth requires teardown.
+
 ## Contributing
 
 VoltIQ is open source (MIT) and contributions are very welcome!
